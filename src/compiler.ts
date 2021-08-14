@@ -6573,16 +6573,7 @@ export class Compiler extends DiagnosticEmitter {
       return false;
     }
 
-    // not yet implemented (TODO: maybe some sort of an unmanaged/lightweight array?)
-    var hasRest = signature.restType;
-    if (hasRest) {
-      this.error(
-        DiagnosticCode.Not_implemented_0,
-        reportNode.range, "Rest parameters"
-      );
-      return false;
-    }
-
+    var restType = signature.restType;
     var minimum = signature.requiredParameters;
     var maximum = signature.parameterTypes.length;
 
@@ -6598,7 +6589,7 @@ export class Compiler extends DiagnosticEmitter {
     }
 
     // must not be called with more than the maximum arguments
-    if (numArguments > maximum && !hasRest) {
+    if (numArguments > maximum && !restType) {
       this.error(
         DiagnosticCode.Expected_0_arguments_but_got_1,
         reportNode.range, maximum.toString(), numArguments.toString()
@@ -6681,21 +6672,49 @@ export class Compiler extends DiagnosticEmitter {
       }
     }
 
-    // Otherwise compile to just a call
+    // ~~ Otherwise compile to just a call here ~~
+
+    var restType = signature.restType;
+    var parameterTypes = signature.parameterTypes;
+
+    var isRest = argumentExpressions.length > parameterTypes.length;
+    var numNonRestParams = isRest ? parameterTypes.length : argumentExpressions.length;
     var numArgumentsInclThis = thisArg ? numArguments + 1 : numArguments;
-    var operands = new Array<ExpressionRef>(numArgumentsInclThis);
+    
+    var numRestParams = isRest ? numArguments - parameterTypes.length : 0;
+    var operands = new Array<ExpressionRef>(numArgumentsInclThis - numRestParams + (restType ? 1 : 0));
+
     var index = 0;
     if (thisArg) {
       operands[0] = thisArg;
       index = 1;
     }
-    var parameterTypes = signature.parameterTypes;
-    for (let i = 0; i < numArguments; ++i, ++index) {
+
+    for (let i = 0; i < numNonRestParams; ++i, ++index) {
       let paramType = parameterTypes[i];
       let paramExpr = this.compileExpression(argumentExpressions[i], paramType, Constraints.CONV_IMPLICIT);
       operands[index] = paramExpr;
     }
-    assert(index == numArgumentsInclThis);
+
+    if (restType && isRest) {  
+      let values = new Array<ExpressionRef | null>(numRestParams);
+      let reportNodes = new Array<Node>(numRestParams);
+
+      let arrayInstance = assert(restType.getClass());
+      let elementType = arrayInstance.getTypeArgumentsTo(this.program.arrayPrototype)![0];
+
+      for (let i = 0, j = numNonRestParams; i < numRestParams; ++i, ++j) {
+        let expression = argumentExpressions[j];
+        reportNodes[i] = expression;
+
+        let paramExpr = this.compileExpression(expression, elementType, Constraints.CONV_IMPLICIT);
+        values[i] = paramExpr;
+      }
+
+      operands[index] = this.makeArray(restType, elementType, values, reportNodes, reportNode, Constraints.CONV_IMPLICIT);
+    }
+    
+    assert(index == numArgumentsInclThis - numRestParams);
     return this.makeCallDirect(instance, operands, reportNode, (constraints & Constraints.WILL_DROP) != 0);
   }
 
@@ -7142,8 +7161,11 @@ export class Compiler extends DiagnosticEmitter {
     }
     var parameterIndex = 0;
     var parameterTypes = signature.parameterTypes;
-    assert(parameterTypes.length >= operands.length - operandIndex);
-    while (operandIndex < operands.length) {
+
+    assert(parameterTypes.length >= operands.length - operandIndex - (signature.restType == null ? 0 : 1));
+    
+    var parameterLength = operandIndex + parameterTypes.length;
+    while (operandIndex < parameterLength) {
       let paramType = parameterTypes[parameterIndex];
       if (paramType.isManaged) {
         let operand = operands[operandIndex];
@@ -7155,6 +7177,11 @@ export class Compiler extends DiagnosticEmitter {
       ++operandIndex;
       ++parameterIndex;
     }
+
+    var left = operands.length - operandIndex;
+    if (signature.restType && left == 1) {
+      operands[operandIndex] = module.tostack(operands[operandIndex]);
+    } else assert(left == 0);
   }
 
   /** Creates a direct call to the specified function. */
@@ -8353,8 +8380,44 @@ export class Compiler extends DiagnosticEmitter {
     if (!element) return module.unreachable();
     assert(element.kind == ElementKind.CLASS);
     var arrayInstance = <Class>element;
-    var arrayType = arrayInstance.type;
     var elementType = arrayInstance.getTypeArgumentsTo(program.arrayPrototype)![0];
+
+    var expressions = expression.elementExpressions;
+    var length = expressions.length;
+
+    var values = new Array<ExpressionRef | null>(length);
+    var reportNodes = new Array<Node>(length);
+
+    for (let i = 0; i < length; i++) {
+      const elementExpression = expressions[i];
+      reportNodes[i] = elementExpression;
+      if (elementExpression.kind != NodeKind.OMITTED) {
+        values[i] = this.compileExpression(<Expression>elementExpression, elementType, Constraints.CONV_IMPLICIT);
+      } else {
+        values[i] = null;
+      }
+    }
+
+    return this.makeArray(arrayInstance.type, elementType, values, reportNodes, expression, constraints);
+  }
+
+  /** 
+   * Compiles an array without the need for an ArrayLiteralExpression node.
+   * @remarks `null` in the expression array stands for omitted expression.
+   */
+  private makeArray(
+    arrayType: Type,
+    elementType: Type,
+    expressions: Array<ExpressionRef | null>,
+    reportNodes: Array<Node>,
+    rootReportNode: Node,
+    constraints: Constraints
+  ): ExpressionRef {
+    var module = this.module;
+    var flow = this.currentFlow;
+    var program = this.program;
+    
+    var arrayInstance = assert(arrayType.getClass());
     var arrayBufferInstance = assert(program.arrayBufferInstance);
 
     // block those here so compiling expressions doesn't conflict
@@ -8362,14 +8425,13 @@ export class Compiler extends DiagnosticEmitter {
     var tempDataStart = flow.getTempLocal(arrayBufferInstance.type);
 
     // compile value expressions and find out whether all are constant
-    var expressions = expression.elementExpressions;
     var length = expressions.length;
+    assert(reportNodes.length == length);
     var values = new Array<ExpressionRef>(length);
     var isStatic = !elementType.isExternalReference;
     for (let i = 0; i < length; ++i) {
-      let elementExpression = expressions[i];
-      if (elementExpression.kind != NodeKind.OMITTED) {
-        let expr = this.compileExpression(<Expression>elementExpression, elementType, Constraints.CONV_IMPLICIT);
+      let expr = expressions[i];
+      if (expr) {
         let precomp = module.runExpression(expr, ExpressionRunnerFlags.PreserveSideeffects);
         if (precomp) {
           expr = precomp;
@@ -8378,7 +8440,7 @@ export class Compiler extends DiagnosticEmitter {
         }
         values[i] = expr;
       } else {
-        values[i] = this.makeZero(elementType, elementExpression);
+        values[i] = this.makeZero(elementType, reportNodes[i]);
       }
     }
 
@@ -8413,7 +8475,7 @@ export class Compiler extends DiagnosticEmitter {
           program.options.isWasm64
             ? module.i64(i64_low(bufferAddress), i64_high(bufferAddress))
             : module.i32(i64_low(bufferAddress))
-        ], expression);
+        ], rootReportNode);
         this.currentType = arrayType;
         return expr;
       }
@@ -8426,7 +8488,7 @@ export class Compiler extends DiagnosticEmitter {
       flow.freeTempLocal(tempDataStart);
       this.error(
         DiagnosticCode.Index_signature_in_type_0_only_permits_reading,
-        expression.range, arrayInstance.internalName
+        rootReportNode.range, arrayInstance.internalName
       );
       this.currentType = arrayType;
       return module.unreachable();
@@ -8446,7 +8508,7 @@ export class Compiler extends DiagnosticEmitter {
           program.options.isWasm64
             ? module.i64(0)
             : module.i32(0)
-        ], expression),
+        ], rootReportNode),
         arrayType.isManaged
       )
     );

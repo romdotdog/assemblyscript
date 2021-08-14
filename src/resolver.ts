@@ -369,7 +369,7 @@ export class Resolver extends DiagnosticEmitter {
     }
     var parameterNodes = node.parameters;
     var numParameters = parameterNodes.length;
-    var parameterTypes = new Array<Type>(numParameters);
+    var parameterTypes = new Array<Type>();
     var requiredParameters = 0;
     var restType = null;
     for (let i = 0; i < numParameters; ++i) {
@@ -402,6 +402,10 @@ export class Resolver extends DiagnosticEmitter {
         case ParameterKind.REST: {
           assert(i == numParameters);
           restType = parameterType;
+          break;
+        }
+        case ParameterKind.OPTIONAL: {
+          parameterTypes[i] = parameterType;
           break;
         }
       }
@@ -2682,7 +2686,7 @@ export class Resolver extends DiagnosticEmitter {
     // resolve parameter types
     var signatureParameters = signatureNode.parameters;
     var numSignatureParameters = signatureParameters.length;
-    var parameterTypes = new Array<Type>(numSignatureParameters);
+    var parameterTypes = new Array<Type>();
     var requiredParameters = 0;
     var restType = null;
     for (let i = 0; i < numSignatureParameters; ++i) {
@@ -2714,7 +2718,6 @@ export class Resolver extends DiagnosticEmitter {
         }
         return null;
       }
-      parameterTypes[i] = parameterType;
       switch (parameterDeclaration.parameterKind) {
         case ParameterKind.DEFAULT:
           requiredParameters = i + 1;
@@ -2722,6 +2725,9 @@ export class Resolver extends DiagnosticEmitter {
           break;
         case ParameterKind.REST:
           restType = parameterType;
+          break;
+        case ParameterKind.OPTIONAL:
+          parameterTypes[i] = parameterType;
           break;
       }
     }
