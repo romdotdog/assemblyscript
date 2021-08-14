@@ -2684,11 +2684,10 @@ export class Resolver extends DiagnosticEmitter {
     var numSignatureParameters = signatureParameters.length;
     var parameterTypes = new Array<Type>(numSignatureParameters);
     var requiredParameters = 0;
+    var restType = null;
     for (let i = 0; i < numSignatureParameters; ++i) {
       let parameterDeclaration = signatureParameters[i];
-      if (parameterDeclaration.parameterKind == ParameterKind.DEFAULT) {
-        requiredParameters = i + 1;
-      }
+      
       let typeNode = parameterDeclaration.type;
       if (isTypeOmitted(typeNode)) {
         if (reportMode == ReportMode.REPORT) {
@@ -2716,6 +2715,17 @@ export class Resolver extends DiagnosticEmitter {
         return null;
       }
       parameterTypes[i] = parameterType;
+      switch (parameterDeclaration.parameterKind) {
+        case ParameterKind.DEFAULT:
+          requiredParameters = i + 1;
+          parameterTypes[i] = parameterType;
+          break;
+        case ParameterKind.REST:
+          restType = parameterType;
+          break;
+        default:
+          assert(false);
+      }
     }
 
     // resolve return type
@@ -2745,7 +2755,7 @@ export class Resolver extends DiagnosticEmitter {
       returnType = type;
     }
 
-    var signature = new Signature(this.program, parameterTypes, returnType, thisType);
+    var signature = new Signature(this.program, parameterTypes, returnType, thisType, restType);
     signature.requiredParameters = requiredParameters;
 
     var nameInclTypeParameters = prototype.name;
