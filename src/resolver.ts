@@ -2723,8 +2723,6 @@ export class Resolver extends DiagnosticEmitter {
         case ParameterKind.REST:
           restType = parameterType;
           break;
-        default:
-          assert(false);
       }
     }
 
