@@ -371,20 +371,9 @@ export class Resolver extends DiagnosticEmitter {
     var numParameters = parameterNodes.length;
     var parameterTypes = new Array<Type>(numParameters);
     var requiredParameters = 0;
-    var hasRest = false;
+    var restType = null;
     for (let i = 0; i < numParameters; ++i) {
       let parameterNode = parameterNodes[i];
-      switch (parameterNode.parameterKind) {
-        case ParameterKind.DEFAULT: {
-          requiredParameters = i + 1;
-          break;
-        }
-        case ParameterKind.REST: {
-          assert(i == numParameters);
-          hasRest = true;
-          break;
-        }
-      }
       let parameterTypeNode = parameterNode.type;
       if (isTypeOmitted(parameterTypeNode)) {
         if (reportMode == ReportMode.REPORT) {
@@ -401,8 +390,21 @@ export class Resolver extends DiagnosticEmitter {
         ctxTypes,
         reportMode
       );
+
       if (!parameterType) return null;
-      parameterTypes[i] = parameterType;
+
+      switch (parameterNode.parameterKind) {
+        case ParameterKind.DEFAULT: {
+          requiredParameters = i + 1;
+          parameterTypes[i] = parameterType;
+          break;
+        }
+        case ParameterKind.REST: {
+          assert(i == numParameters);
+          restType = parameterType;
+          break;
+        }
+      }
     }
     var returnTypeNode = node.returnType;
     var returnType: Type | null;
@@ -423,9 +425,8 @@ export class Resolver extends DiagnosticEmitter {
       );
       if (!returnType) return null;
     }
-    var signature = new Signature(this.program, parameterTypes, returnType, thisType);
+    var signature = new Signature(this.program, parameterTypes, returnType, thisType, restType);
     signature.requiredParameters = requiredParameters;
-    signature.hasRest = hasRest;
     return node.isNullable ? signature.type.asNullable() : signature.type;
   }
 
