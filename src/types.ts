@@ -746,7 +746,7 @@ export class Signature {
   /** This type, if an instance signature. */
   thisType: Type | null;
   /** Whether the last parameter is a rest parameter. */
-  hasRest: bool;
+  restType: Type | null;
   /** Respective function type. */
   type: Type;
   /** The program that created this signature. */
@@ -757,14 +757,15 @@ export class Signature {
     program: Program,
     parameterTypes: Type[] | null = null,
     returnType: Type | null = null,
-    thisType: Type | null = null
+    thisType: Type | null = null,
+    restType: Type | null = null
   ) {
     this.parameterTypes = parameterTypes ? parameterTypes : [];
     this.requiredParameters = 0;
     this.returnType = returnType ? returnType : Type.void;
     this.thisType = thisType;
+    this.restType = restType;
     this.program = program;
-    this.hasRest = false;
     var usizeType = program.options.usizeType;
     var type = new Type(usizeType.kind, usizeType.flags & ~TypeFlags.VALUE | TypeFlags.REFERENCE, usizeType.size);
     this.type = type;
@@ -819,7 +820,7 @@ export class Signature {
     }
 
     // check rest parameter
-    if (this.hasRest != other.hasRest) return false;
+    if (this.restType != other.restType) return false;
 
     // check parameter types
     var thisParameterTypes = this.parameterTypes;
@@ -847,7 +848,7 @@ export class Signature {
     }
 
     // check rest parameter
-    if (this.hasRest != target.hasRest) return false; // TODO
+    if (this.restType != target.restType) return false; // TODO
 
     // check parameter types
     var thisParameterTypes = this.parameterTypes;
@@ -916,7 +917,7 @@ export class Signature {
     var numParameters = parameters.length;
     if (numParameters) {
       let optionalStart = this.requiredParameters;
-      let restIndex = this.hasRest ? numParameters - 1 : -1;
+      let restIndex = this.restType ? numParameters - 1 : -1;
       for (let i = 0; i < numParameters; ++i, ++index) {
         if (index) sb.push(validWat ? "%2C" : ", ");
         if (i == restIndex) sb.push("...");

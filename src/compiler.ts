@@ -6574,7 +6574,7 @@ export class Compiler extends DiagnosticEmitter {
     }
 
     // not yet implemented (TODO: maybe some sort of an unmanaged/lightweight array?)
-    var hasRest = signature.hasRest;
+    var hasRest = signature.restType;
     if (hasRest) {
       this.error(
         DiagnosticCode.Not_implemented_0,
